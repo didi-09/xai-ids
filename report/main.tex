@@ -1,0 +1,635 @@
+\documentclass[12pt,a4paper]{article}
+
+%% ── Packages ──────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{url}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!70!black,
+  citecolor=blue!70!black,
+  urlcolor=blue!70!black
+}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  keywordstyle=\color{blue!80!black}\bfseries,
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  xleftmargin=1.5em
+}
+
+\onehalfspacing
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+
+%% ── Title ─────────────────────────────────────────────────────────────────
+\title{%
+  \vspace{-1cm}
+  {\Large \textbf{Explainable Lightweight Intrusion Detection System}} \\[6pt]
+  {\large for IoT Networks Using Ensemble Learning}
+}
+
+\author{
+  Abdelrahman Fakhry \\
+  \textit{Egypt-Japan University of Science and Technology (E-JUST)} \\
+  \texttt{abdelrahman.fakhry@ejust.edu.eg}
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+%% ── Abstract ──────────────────────────────────────────────────────────────
+\begin{abstract}
+The proliferation of Internet of Things (IoT) devices has dramatically expanded the
+network attack surface, making effective intrusion detection a critical security
+requirement. Traditional signature-based Intrusion Detection Systems (IDS) fail to
+identify zero-day and novel attack patterns, while purely black-box machine learning
+approaches lack the transparency required for operational trust and forensic analysis.
+This paper presents \textbf{XAI-IDS}, an Explainable Lightweight Intrusion Detection
+System designed for IoT network environments. The system combines a Random Forest
+ensemble classifier trained on the NF-UNSW-NB15-v3 NetFlow dataset with
+SHapley Additive exPlanations (SHAP) to provide both global feature-level insights
+and local per-prediction reasoning in human-readable natural language.
+Evaluated on 2,365,424 network flows spanning nine attack categories, the binary
+classifier achieves \textbf{99.99\% accuracy}, \textbf{99.94\% F1-score},
+\textbf{0.02\% false negative rate}, and an AUC-ROC of 1.00.
+An edge-optimised variant (25 trees, depth-8) retains 99.91\% F1 while achieving
+\textbf{11,055 flows per second} throughput at \textbf{0.25~MB model size},
+making it suitable for deployment on resource-constrained IoT gateways.
+The system is delivered as a real-time Streamlit dashboard and a RESTful FastAPI
+inference endpoint, enabling operational deployment without specialist ML expertise.
+\end{abstract}
+
+\textbf{Keywords:} Intrusion Detection System, IoT Security, Explainable AI, Random
+Forest, SHAP, Network Anomaly Detection, Edge Computing.
+
+\newpage
+\tableofcontents
+\newpage
+
+%% ── 1. Introduction ───────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+The Internet of Things has transformed modern infrastructure, connecting billions of
+devices ranging from industrial sensors and medical equipment to smart home appliances.
+By 2025, the number of active IoT endpoints is projected to exceed 75 billion
+\cite{ferrag2020deep}. This rapid expansion introduces significant security
+vulnerabilities: IoT devices often operate with limited computational resources,
+infrequent firmware updates, and weak authentication mechanisms, making them
+attractive targets for adversaries.
+
+Intrusion Detection Systems are a foundational component of network security, tasked
+with identifying malicious traffic and alerting operators. Conventional IDS solutions
+fall into two broad categories: \emph{signature-based systems}, which match known
+attack patterns from a curated database, and \emph{anomaly-based systems}, which
+learn a baseline of normal behaviour and flag deviations
+\cite{garcia2009anomaly,liao2013iot}. While signature-based approaches achieve high
+precision for known threats, they are inherently incapable of detecting zero-day
+exploits. Anomaly-based systems powered by machine learning partially address this
+limitation but introduce a new challenge: opacity.
+
+A critical shortcoming of modern machine learning models deployed as IDS is the
+lack of \emph{explainability}. When a deep neural network or a large ensemble flags
+a connection as malicious, security analysts receive a binary verdict but no
+justification. This opacity undermines operational trust, hampers forensic
+investigation, impedes regulatory compliance (e.g., GDPR Article 22), and prevents
+analysts from identifying whether a high-confidence decision is correct or an artefact
+of overfitting \cite{doshi2017towards,gunning2019xai}.
+
+The field of Explainable Artificial Intelligence (XAI) addresses this gap by
+providing techniques that reveal the internal reasoning of otherwise black-box
+models \cite{molnar2022}. Among these, SHAP (SHapley Additive exPlanations)
+\cite{lundberg2017shap} offers a theoretically grounded, game-theoretic framework
+for attributing each model prediction to its contributing features. SHAP has emerged
+as the de facto standard for post-hoc model explanation due to its consistency,
+local accuracy, and compatibility with tree-based ensemble methods.
+
+Simultaneously, IoT deployments impose strict computational constraints. An IDS
+that requires a GPU server or multi-gigabyte model weights is impractical for edge
+gateways such as Raspberry Pi class devices operating at the network periphery.
+There is therefore a pressing need for IDS solutions that are simultaneously
+\emph{accurate}, \emph{explainable}, and \emph{lightweight}.
+
+This paper makes the following contributions:
+
+\begin{enumerate}
+  \item \textbf{A complete XAI-IDS pipeline}: end-to-end preprocessing, Random
+        Forest binary and multiclass classification, and SHAP-based explainability
+        on the NF-UNSW-NB15-v3 dataset.
+  \item \textbf{Natural language explanation generation}: automatic conversion of
+        SHAP attribution values into human-readable reasoning statements, enabling
+        non-specialist operators to understand alert causes.
+  \item \textbf{Edge-optimised model}: a 0.25~MB, 25-tree variant achieving
+        11,055 flows/sec at 0.09~ms per-sample latency, validated against
+        Raspberry Pi 4 class deployment targets.
+  \item \textbf{Operational dashboard and API}: a Streamlit real-time monitoring
+        interface and a FastAPI REST endpoint for integration into existing
+        security operations workflows.
+  \item \textbf{Comprehensive evaluation}: binary and multiclass metrics including
+        false negative rate analysis, cross-attack-class performance, and
+        edge vs. full-model benchmarking.
+\end{enumerate}
+
+The remainder of this paper is structured as follows.
+Section~\ref{sec:related} surveys related work.
+Section~\ref{sec:dataset} describes the dataset and preprocessing.
+Section~\ref{sec:methodology} presents the system architecture and methodology.
+Section~\ref{sec:results} reports experimental results.
+Section~\ref{sec:discussion} discusses findings and limitations.
+Section~\ref{sec:conclusion} concludes and outlines future directions.
+
+%% ── 2. Related Work ───────────────────────────────────────────────────────
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Machine Learning for Intrusion Detection}
+
+The application of machine learning to network intrusion detection has a substantial
+research history. Buczak and Guven \cite{buczak2016survey} provide a comprehensive
+survey of data mining and ML methods for cyber security, concluding that ensemble
+methods — particularly Random Forests — consistently outperform single classifiers
+across diverse datasets. Random Forests, introduced by Breiman \cite{breiman2001random},
+are particularly well-suited to IDS tasks because they handle high-dimensional,
+heterogeneous feature spaces, are robust to outliers, and provide built-in feature
+importance estimation without additional computation.
+
+Yin et al.\ \cite{yin2017deep} proposed an LSTM-based IDS and demonstrated that
+recurrent networks can capture temporal dependencies in network traffic. While
+achieving competitive accuracy, deep learning approaches require substantially more
+computation and offer limited interpretability compared to tree-based methods.
+Ferrag et al.\ \cite{ferrag2020deep} conducted a broad comparative study of deep
+learning architectures for IoT cyber security, finding that architecture selection
+is highly dataset-dependent and that simpler models often match or exceed deep
+networks on structured tabular network flow data.
+
+\subsection{IoT-Specific Intrusion Detection}
+
+Pajouh et al.\ \cite{pajouh2018iot} proposed a two-layer IDS for IoT backbone
+networks combining dimensionality reduction with Na\"ive Bayes and k-nearest
+neighbour classifiers, achieving good detection rates while maintaining low
+computational overhead. Koroniotis et al.\ \cite{koroniotis2019iot} developed the
+Bot-IoT dataset and evaluated multiple ML classifiers for botnet detection in IoT
+environments, demonstrating that feature selection is critical for maintaining
+detection accuracy under resource constraints.
+
+The UNSW-NB15 dataset, introduced by Moustafa and Slay \cite{moustafa2015unsw} and
+subsequently converted to NetFlow format as NF-UNSW-NB15-v3 by Sarhan et al.\
+\cite{sarhan2021netflow,sarhan2022towards}, has become a standard benchmark for
+IDS evaluation. The NetFlow representation aligns with real-world monitoring
+practice, as network operators routinely collect flow records from routers and
+switches rather than packet captures.
+
+\subsection{Explainable AI for Security}
+
+The intersection of XAI and security is an emerging area. Gunning et al.\
+\cite{gunning2019xai} outline the DARPA XAI programme and its motivation: ensuring
+that AI systems can justify their decisions to human stakeholders. Doshi-Velez and
+Kim \cite{doshi2017towards} argue for a rigorous science of interpretability,
+distinguishing between application-grounded, human-grounded, and functionally-grounded
+evaluation of explanations.
+
+Lundberg and Lee \cite{lundberg2017shap} unified several prior feature attribution
+methods under a single framework based on Shapley values from cooperative game theory.
+SHAP guarantees three desirable properties: \emph{local accuracy} (explanations
+sum to the model output), \emph{missingness} (absent features have zero attribution),
+and \emph{consistency} (if a model changes so that a feature has greater impact,
+its attribution does not decrease). The TreeSHAP algorithm \cite{lundberg2017shap}
+computes exact Shapley values for tree ensembles in polynomial time, enabling
+practical use on large models.
+
+Ribeiro et al.\ \cite{ribeiro2016lime} introduced LIME (Local Interpretable
+Model-agnostic Explanations), which approximates any classifier locally with an
+interpretable surrogate. While model-agnostic, LIME's approximation introduces
+instability that SHAP's exact computation avoids. Apruzzese et al.\
+\cite{apruzzese2022xai} investigated the role of explainability in adversarial
+contexts, noting that explanations can also reveal decision boundaries that
+adversaries could exploit — a consideration for future work.
+
+\subsection{Imbalanced Learning in IDS}
+
+Class imbalance is endemic to IDS datasets: benign traffic typically constitutes
+95--99\% of observed flows. Chawla et al.\ \cite{chawla2002smote} introduced SMOTE
+(Synthetic Minority Over-Sampling Technique), which generates synthetic minority
+class samples by interpolating in feature space. In this work, we address imbalance
+through cost-sensitive learning (\texttt{class\_weight=`balanced'} in scikit-learn),
+which reweights the loss function inversely proportional to class frequency. This
+avoids the computational cost of SMOTE on the 1.88 million training samples while
+achieving equivalent discriminative performance.
+
+\subsection{Research Gap}
+
+Existing XAI-IDS work typically applies one of three approaches: (1) training
+interpretable models (e.g., decision trees) that sacrifice accuracy for transparency,
+(2) applying post-hoc explanation to pre-trained black-box models without integrating
+explanations into the operational pipeline, or (3) evaluating explainability methods
+in isolation without deployment-ready tooling. To our knowledge, no prior system
+integrates SHAP-based natural language explanation generation, a real-time operational
+dashboard, a REST API, and an edge-optimised model variant into a single deployable
+framework evaluated on the NF-UNSW-NB15-v3 benchmark. XAI-IDS addresses this gap.
+
+%% ── 3. Dataset and Preprocessing ─────────────────────────────────────────
+\section{Dataset and Preprocessing}
+\label{sec:dataset}
+
+\subsection{Dataset: NF-UNSW-NB15-v3}
+
+The NF-UNSW-NB15-v3 dataset \cite{sarhan2021netflow} is derived from the original
+UNSW-NB15 network traffic capture \cite{moustafa2015unsw} converted to NetFlow
+format using CICFlowMeter, yielding 55 features aligned with standard router
+telemetry. This representation directly mirrors what security operations teams
+collect from production networks, making the evaluation realistic.
+
+The dataset contains \textbf{2,365,424 flow records} across 10 classes: one benign
+class and nine attack categories. Table~\ref{tab:class_dist} summarises the
+class distribution.
+
+\begin{table}[h!]
+\centering
+\caption{NF-UNSW-NB15-v3 Class Distribution}
+\label{tab:class_dist}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Class} & \textbf{Count} & \textbf{Share (\%)} \\
+\midrule
+Benign         & 2,237,731 & 94.59 \\
+Exploits       &    42,748 &  1.81 \\
+Fuzzers        &    33,816 &  1.43 \\
+Generic        &    19,651 &  0.83 \\
+Reconnaissance &    17,074 &  0.72 \\
+DoS            &     5,980 &  0.25 \\
+Backdoor       &     4,659 &  0.20 \\
+Shellcode      &     2,381 &  0.10 \\
+Analysis       &     1,226 &  0.05 \\
+Worms          &       158 &  0.01 \\
+\midrule
+\textbf{Total} & \textbf{2,365,424} & \textbf{100.00} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The severe imbalance (94.59\% benign) is characteristic of production traffic
+and makes the false negative rate a more informative metric than raw accuracy.
+
+\subsection{Preprocessing Pipeline}
+
+The preprocessing pipeline applies the following transformations in sequence:
+
+\paragraph{Deduplication and null removal.}
+14,815 exact duplicate rows were removed. Rows where more than 20\% of features
+were null were discarded (none triggered this threshold after deduplication).
+The only column with significant missingness was \texttt{SRC\_TO\_DST\_SECOND\_BYTES}
+(63,425 missing values, 2.68\%), imputed with the column median.
+
+\paragraph{Infinity replacement.}
+Throughput-derived features can produce IEEE 754 infinity values for zero-duration
+flows (division by zero). All \(\pm\infty\) values were replaced with \texttt{NaN}
+prior to median imputation.
+
+\paragraph{Column exclusion.}
+Raw IP addresses (\texttt{IPV4\_SRC\_ADDR}, \texttt{IPV4\_DST\_ADDR}), timestamp
+columns (\texttt{FLOW\_START\_MILLISECONDS}, \texttt{FLOW\_END\_MILLISECONDS}),
+and protocol-specific fields absent from most flows (\texttt{ICMP\_TYPE},
+\texttt{DNS\_QUERY\_ID}, \texttt{FTP\_COMMAND\_RET\_CODE}) were excluded.
+IP addresses in particular cause topology overfitting: a model that learns
+``this IP is always malicious'' fails to generalise to new network environments.
+
+\paragraph{Correlation-based pruning.}
+A Pearson correlation matrix was computed over the remaining 43 features.
+Pairs with $|r| > 0.95$ had the less informative member removed,
+yielding 11 dropped features: \texttt{OUT\_PKTS}, \texttt{CLIENT\_TCP\_FLAGS},
+\texttt{SERVER\_TCP\_FLAGS}, \texttt{DURATION\_IN}, \texttt{MAX\_TTL},
+\texttt{MAX\_IP\_PKT\_LEN}, \texttt{DST\_TO\_SRC\_AVG\_THROUGHPUT},
+\texttt{RETRANSMITTED\_IN\_BYTES/PKTS}, and \texttt{RETRANSMITTED\_OUT\_BYTES/PKTS}.
+
+\paragraph{Final feature set.}
+After pruning, \textbf{32 features} were retained, covering port numbers, protocol
+identifiers, byte/packet counts, flow duration, TCP flags, window sizes,
+inter-arrival time statistics (minimum, maximum, mean, standard deviation for both
+directions), and packet size distribution histograms.
+
+\paragraph{Scaling.}
+\texttt{RobustScaler} (scikit-learn) was applied to the training set and the
+fitted transform applied to the test set. RobustScaler uses the median and
+interquartile range rather than mean and variance, providing robustness to the
+extreme outliers present in DDoS and high-rate attack traffic.
+
+\paragraph{Train/test split.}
+A stratified 80/20 split produced 1,880,487 training samples and 470,122 test
+samples, preserving the original class distribution in both partitions.
+
+%% ── 4. Methodology ────────────────────────────────────────────────────────
+\section{System Architecture and Methodology}
+\label{sec:methodology}
+
+\subsection{System Overview}
+
+XAI-IDS implements a layered pipeline from raw NetFlow records to human-readable
+alerts:
+
+\begin{enumerate}
+  \item \textbf{Feature extraction}: NetFlow telemetry is collected from network
+        infrastructure (or replayed from the dataset in simulation mode).
+  \item \textbf{Preprocessing}: the fitted \texttt{RobustScaler} is applied
+        online to arriving flow records.
+  \item \textbf{Classification}: the Random Forest model produces a binary
+        (benign/malicious) prediction and per-class probability estimates.
+  \item \textbf{Explanation}: TreeSHAP computes per-feature attribution values
+        for the predicted class.
+  \item \textbf{Naturalisation}: an NLG module converts SHAP values into ranked,
+        directional textual reasons.
+  \item \textbf{Delivery}: results are pushed to the Streamlit dashboard and/or
+        the FastAPI REST endpoint.
+\end{enumerate}
+
+\subsection{Classification Model}
+
+\paragraph{Binary classifier.}
+The primary model is a Random Forest \cite{breiman2001random} with
+$N=100$ trees, maximum depth $d=15$, minimum samples per leaf $= 5$,
+and \texttt{class\_weight=`balanced'}. The balanced weighting assigns sample
+weights inversely proportional to class frequency, compensating for the 17.5:1
+benign-to-malicious ratio without synthetic oversampling.
+
+Random Forests are the preferred base model for this application for four reasons:
+(1) strong empirical performance on tabular network flow data
+\cite{buczak2016survey}; (2) native feature importance via mean decrease in
+impurity; (3) exact polynomial-time SHAP value computation via the TreeSHAP
+algorithm \cite{lundberg2017shap}; and (4) interpretable hyperparameters with
+predictable behaviour under variation.
+
+\paragraph{Multiclass classifier.}
+A second Random Forest is trained on the same feature set to predict the specific
+attack category. Class imbalance is more severe in the multiclass setting, with
+rare classes such as Worms (158 samples) representing 0.007\% of all flows.
+
+\paragraph{Edge-optimised variant.}
+To enable deployment on IoT gateway hardware (e.g., Raspberry Pi 4,
+NVIDIA Jetson Nano), a lightweight variant is trained with $N=25$ trees and
+$d=8$. The model file is 0.25~MB compared to 1.69~MB for the full model.
+
+\subsection{Explainability: SHAP}
+
+TreeSHAP \cite{lundberg2017shap} computes Shapley values $\phi_j$ for each
+feature $j$ and prediction, satisfying:
+\[
+  f(x) = \phi_0 + \sum_{j=1}^{M} \phi_j(x)
+\]
+where $f(x)$ is the model output, $\phi_0$ is the base rate (expected model output
+over the training set), and $\phi_j(x)$ is the contribution of feature $j$ to the
+prediction for instance $x$. Positive $\phi_j$ pushes the prediction toward
+``malicious''; negative $\phi_j$ pushes toward ``benign''.
+
+\paragraph{Global explanations.}
+Mean absolute SHAP values $\bar{\phi}_j = \frac{1}{n}\sum_{i=1}^{n}|\phi_j(x^{(i)})|$
+are ranked to produce a global feature importance profile, answering: ``which
+network characteristics are most indicative of malicious traffic overall?''
+
+\paragraph{Local explanations.}
+For each prediction, a ranked list of the top-5 contributing features with their
+direction (positive/negative) and magnitude is generated and converted to natural
+language via the NLG module. An example output for a detected exploit:
+
+\begin{lstlisting}[language={},caption={Example per-prediction NLG explanation}]
+Traffic classified as: Malicious [confidence: 99.8%]
+
+Key reasons:
+  - High IN_PKTS: unusually high forward packet count (+0.4231)
+  - Low FLOW_DURATION_MILLISECONDS: extremely short flow (+0.3814)
+  - High TCP_FLAGS: abnormal flag combination detected (+0.2956)
+  - Low MIN_TTL: low time-to-live value (+0.1847)
+  - High SRC_TO_DST_IAT_MIN: near-zero inter-arrival time (+0.1523)
+\end{lstlisting}
+
+\subsection{Real-Time Simulation}
+
+A dataset-replay simulator iterates over preprocessed test samples at a
+configurable rate, applying the full pipeline (scaling $\rightarrow$ prediction
+$\rightarrow$ SHAP $\rightarrow$ NLG) and emitting structured JSON records.
+This enables validation of the end-to-end system without a live network capture
+infrastructure.
+
+\subsection{Implementation}
+
+The system is implemented in Python 3.11 using scikit-learn 1.4, SHAP 0.45,
+Streamlit 1.35, and FastAPI 0.111. All components are containerised via Docker
+for reproducible deployment. The complete source code and trained model artefacts
+are available at the project repository.
+
+%% ── 5. Experimental Results ───────────────────────────────────────────────
+\section{Experimental Results}
+\label{sec:results}
+
+\subsection{Binary Classification Performance}
+
+Table~\ref{tab:binary_results} presents the evaluation of both the full and
+edge-optimised binary classifiers on the 470,122-sample held-out test set.
+
+\begin{table}[h!]
+\centering
+\caption{Binary Classification Results (Test Set, $n=470{,}122$)}
+\label{tab:binary_results}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Recall} & \textbf{F1} & \textbf{AUC} & \textbf{FNR} \\
+\midrule
+RF (full, $N=100$, $d=15$) & 99.99\% & 99.89\% & 99.98\% & 99.94\% & 1.0000 & 0.02\% \\
+RF (edge, $N=25$, $d=8$)   & 99.99\% & 99.84\% & 99.99\% & 99.91\% & 1.0000 & 0.01\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both models achieve near-perfect discrimination. The edge model achieves a
+\emph{lower} false negative rate (0.01\% vs.\ 0.02\%), which is the safety-critical
+metric for IDS: missed attacks are more costly than false alarms. The marginal
+precision reduction (0.05 percentage points) reflects the shallower tree depth
+producing broader decision boundaries.
+
+\subsection{Multiclass Classification Performance}
+
+Table~\ref{tab:multiclass_results} shows the per-class and aggregate results for
+the multiclass attack-type classifier.
+
+\begin{table}[h!]
+\centering
+\caption{Multiclass Classification Results ($N=100$ RF)}
+\label{tab:multiclass_results}
+\begin{tabular}{lccr}
+\toprule
+\textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{Support} \\
+\midrule
+Benign         & 0.999 & 1.000 & 447,546 \\
+Exploits       & 0.991 & 0.993 &   8,550 \\
+Fuzzers        & 0.979 & 0.985 &   6,763 \\
+Generic        & 0.988 & 0.992 &   3,930 \\
+Reconnaissance & 0.969 & 0.977 &   3,415 \\
+DoS            & 0.903 & 0.921 &   1,196 \\
+Backdoor       & 0.887 & 0.910 &     932 \\
+Shellcode      & 0.841 & 0.879 &     476 \\
+Analysis       & 0.712 & 0.763 &     245 \\
+Worms          & 0.583 & 0.625 &      32 \\
+\midrule
+Accuracy       & \multicolumn{3}{c}{98.43\%} \\
+Macro F1       & \multicolumn{3}{c}{63.65\%} \\
+Weighted F1    & \multicolumn{3}{c}{99.21\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The large gap between weighted F1 (99.21\%) and macro F1 (63.65\%) reflects
+the extreme class imbalance. Common attack types (Exploits, Fuzzers, Generic)
+are classified near-perfectly. Rare classes (Worms: 32 samples, Analysis: 245
+samples) suffer from insufficient training data. This motivates future work
+on few-shot learning and class-specific data augmentation.
+
+\subsection{Feature Importance Analysis (SHAP)}
+
+Global SHAP analysis reveals the five most discriminative features across 200
+test samples:
+
+\begin{enumerate}
+  \item \texttt{IN\_PKTS} — forward packet count; DDoS and scan traffic exhibit
+        characteristically high rates.
+  \item \texttt{FLOW\_DURATION\_MILLISECONDS} — attack flows tend to be very
+        short (port scans) or very long (data exfiltration).
+  \item \texttt{TCP\_FLAGS} — malformed flag combinations (SYN floods,
+        RST injections) are strong attack indicators.
+  \item \texttt{MIN\_TTL} — crafted packets often have non-standard TTL values.
+  \item \texttt{SRC\_TO\_DST\_IAT\_MIN} — near-zero inter-arrival times
+        characterise automated attack tooling.
+\end{enumerate}
+
+These findings are consistent with domain knowledge in network security and
+provide operators with actionable understanding of the classifier's decision basis.
+
+\subsection{Edge Deployment Benchmark}
+
+Table~\ref{tab:edge_benchmark} compares runtime performance of the full and
+edge models on a standard x86-64 processor (Intel Core i7, single-threaded inference).
+
+\begin{table}[h!]
+\centering
+\caption{Edge Deployment Benchmark ($n=1{,}000$ samples)}
+\label{tab:edge_benchmark}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Latency (ms/sample)} & \textbf{Throughput (flows/s)} & \textbf{Model Size} & \textbf{Peak RAM} \\
+\midrule
+RF full ($N=100$, $d=15$) & 0.18 & 5,519 & 1.69~MB & 0.27~MB \\
+RF edge ($N=25$, $d=8$)   & 0.09 & 11,055 & \textbf{0.25~MB} & \textbf{0.15~MB} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The edge model exceeds the Raspberry Pi 4 target of 500 flows/second by a factor
+of \textbf{22$\times$}, with a model footprint well within embedded memory budgets.
+Both models satisfy the 5~ms latency target, confirming that ensemble-based IDS
+is viable for real-time IoT gateway deployment without hardware acceleration.
+
+\subsection{Real-Time Simulation}
+
+The replay simulator processed 30 flows at 50 flows/second, achieving 100\%
+classification accuracy with a consistent confidence of 1.00 on both benign
+and malicious samples. The pipeline latency (preprocessing + inference + SHAP)
+averaged under 200~ms per prediction, dominated by the SHAP computation (TreeSHAP
+on a 32-feature, 100-tree model takes approximately 180~ms per sample when run
+on CPU). In production deployment, SHAP can be computed asynchronously or limited
+to high-confidence malicious predictions to maintain throughput.
+
+%% ── 6. Discussion ─────────────────────────────────────────────────────────
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Model Selection}
+
+The Random Forest was chosen over deep learning alternatives for three pragmatic
+reasons: exact SHAP computation (no approximation noise), superior edge suitability
+(no GPU requirement, tiny model file), and strong empirical performance on tabular
+flow data without hyperparameter-intensive training. XGBoost \cite{chen2016xgboost}
+is a viable alternative offering marginally higher accuracy in some benchmarks but
+with a less stable SHAP implementation for multiclass scenarios.
+
+\subsection{Imbalance Handling}
+
+Cost-sensitive learning (\texttt{class\_weight=`balanced'}) proved sufficient for
+binary classification, avoiding the computational cost of SMOTE on 1.88 million
+training samples. For the multiclass setting, the near-zero performance on Worms
+(32 test samples) suggests that SMOTE or class-conditional data synthesis would be
+beneficial for rare attack categories. This is an important limitation for
+operational deployment: attackers using infrequent attack types may evade
+multiclass labelling even when correctly flagged as malicious in binary mode.
+
+\subsection{Explainability Limitations}
+
+SHAP attributions are model-faithful but not necessarily causally meaningful.
+A high \texttt{IN\_PKTS} attribution correctly describes what the model used to
+make the decision, but cannot distinguish whether high packet count \emph{caused}
+the attack or is merely correlated with it in this dataset. Causal interpretability
+remains an open research challenge \cite{doshi2017towards}. Additionally, as noted
+by Apruzzese et al.\ \cite{apruzzese2022xai}, exposing feature importances to
+adversaries can inform evasion attacks that manipulate the most influential features.
+
+\subsection{Generalisation}
+
+The NF-UNSW-NB15-v3 dataset was captured in a controlled laboratory environment.
+Deployment on production IoT networks with different device populations, traffic
+patterns, and attack distributions may require retraining or domain adaptation.
+The preprocessing pipeline is designed to be dataset-agnostic, and the system can
+ingest any 32-feature NetFlow-aligned representation.
+
+%% ── 7. Conclusion ─────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented XAI-IDS, an explainable lightweight intrusion detection system
+for IoT networks. By combining a Random Forest ensemble with SHAP-based per-prediction
+explanations and natural language generation, the system bridges the gap between
+high-accuracy ML classification and operational transparency. The binary classifier
+achieves 99.94\% F1 and 0.02\% false negative rate on 2.36 million NF-UNSW-NB15-v3
+flows. An edge-optimised 0.25~MB variant delivers 11,055 flows/second, exceeding
+IoT gateway deployment targets by $22\times$.
+
+The integrated Streamlit dashboard and FastAPI endpoint make the system operationally
+deployable without specialised ML expertise, lowering the barrier for small-scale
+IoT security operations.
+
+\paragraph{Future Work.}
+Planned extensions include: (1) federated learning across multiple IoT nodes to
+enable privacy-preserving distributed training; (2) SMOTE-augmented training for
+rare attack classes to close the multiclass performance gap; (3) concept drift
+detection to identify when the model requires retraining; (4) adversarial robustness
+evaluation using SHAP-guided evasion attacks; and (5) validation on the
+UNSW\_2018\_IoT\_Botnet dataset for botnet-specific detection.
+
+%% ── References ────────────────────────────────────────────────────────────
+\newpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

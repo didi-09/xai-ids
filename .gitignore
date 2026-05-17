@@ -1,0 +1,38 @@
+# Data — large files, never commit raw/processed datasets
+data/raw/
+data/processed/
+data/samples/*.png
+
+# Trained model binaries
+models/*.pkl
+models/*.onnx
+
+# LaTeX build artifacts
+report/*.aux
+report/*.log
+report/*.bbl
+report/*.blg
+report/*.out
+report/*.toc
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Environment
+.env
+*.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db

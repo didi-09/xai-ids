@@ -1,0 +1,18 @@
+[
+  {
+    "model": "rf_binary.pkl",
+    "n_samples": 1000,
+    "latency_ms_per_sample": 0.1812,
+    "throughput_flows_per_sec": 5519.1,
+    "peak_ram_mb": 0.27,
+    "model_file_mb": 1.69
+  },
+  {
+    "model": "rf_binary_edge.pkl",
+    "n_samples": 1000,
+    "latency_ms_per_sample": 0.0905,
+    "throughput_flows_per_sec": 11054.6,
+    "peak_ram_mb": 0.15,
+    "model_file_mb": 0.25
+  }
+]
