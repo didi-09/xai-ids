@@ -65,9 +65,6 @@ GET /health
 
 [NF-UNSW-NB15-v3](https://staff.itee.uq.edu.au/marius/NIDS_datasets/) — Sarhan et al. 2021
 
-## Paper
-
-See `report/main.tex` — 17-page IEEE-style paper with Abstract, Introduction, Related Work (20 citations), Methodology, Results, and Discussion.
 
 Compile with:
 ```bash
