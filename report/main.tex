@@ -360,6 +360,15 @@ extreme outliers present in DDoS and high-rate attack traffic.
 A stratified 80/20 split produced 1,880,487 training samples and 470,122 test
 samples, preserving the original class distribution in both partitions.
 
+\begin{figure}[h!]
+\centering
+\includegraphics[width=\linewidth]{arch_preprocessing.png}
+\caption{Preprocessing pipeline: seven sequential transformations reduce the raw
+2.36M$\times$55 dataset to clean 1.88M$\times$32 training and 470K$\times$32 test
+arrays saved as compressed \texttt{.npy} artefacts.}
+\label{fig:arch_preprocessing}
+\end{figure}
+
 %% ── 4. Methodology ────────────────────────────────────────────────────────
 \section{System Architecture and Methodology}
 \label{sec:methodology}
@@ -367,7 +376,17 @@ samples, preserving the original class distribution in both partitions.
 \subsection{System Overview}
 
 XAI-IDS implements a layered pipeline from raw NetFlow records to human-readable
-alerts:
+alerts. Figure~\ref{fig:arch_system} illustrates the complete system architecture.
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=\linewidth]{arch_system.png}
+\caption{XAI-IDS full system architecture. Raw network traffic flows through
+preprocessing, Random Forest classification, SHAP attribution, and NLG to produce
+human-readable alerts delivered via the Streamlit dashboard, FastAPI endpoint,
+or SIEM export.}
+\label{fig:arch_system}
+\end{figure}
 
 \begin{enumerate}
   \item \textbf{Feature extraction}: NetFlow telemetry is collected from network
@@ -410,6 +429,19 @@ To enable deployment on IoT gateway hardware (e.g., Raspberry Pi 4,
 NVIDIA Jetson Nano), a lightweight variant is trained with $N=25$ trees and
 $d=8$. The model file is 0.25~MB compared to 1.69~MB for the full model.
 
+Figure~\ref{fig:arch_training} summarises the full training architecture,
+showing both binary and multiclass branches with their respective model variants
+and achieved performance metrics.
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=\linewidth]{arch_training.png}
+\caption{Training architecture. The preprocessed dataset feeds two parallel branches:
+binary classification (full and edge RF variants) and multiclass classification
+(RF and XGBoost). Achieved metrics are shown for each branch.}
+\label{fig:arch_training}
+\end{figure}
+
 \subsection{Explainability: SHAP}
 
 TreeSHAP \cite{lundberg2017shap} computes Shapley values $\phi_j$ for each
@@ -421,6 +453,15 @@ where $f(x)$ is the model output, $\phi_0$ is the base rate (expected model outp
 over the training set), and $\phi_j(x)$ is the contribution of feature $j$ to the
 prediction for instance $x$. Positive $\phi_j$ pushes the prediction toward
 ``malicious''; negative $\phi_j$ pushes toward ``benign''.
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=\linewidth]{arch_explainability.png}
+\caption{Explainability pipeline. Each prediction feeds into two branches:
+the global branch aggregates SHAP values across all samples for feature importance
+visualisation; the local branch produces per-alert force plots and NLG reasoning.}
+\label{fig:arch_explainability}
+\end{figure}
 
 \paragraph{Global explanations.}
 Mean absolute SHAP values $\bar{\phi}_j = \frac{1}{n}\sum_{i=1}^{n}|\phi_j(x^{(i)})|$
