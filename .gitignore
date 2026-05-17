@@ -1,7 +1,6 @@
 # Data — large files, never commit raw/processed datasets
 data/raw/
 data/processed/
-data/samples/*.png
 
 # Trained model binaries
 models/*.pkl

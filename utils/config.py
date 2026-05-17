@@ -7,7 +7,9 @@ DATA_SAMPLES = ROOT / "data" / "samples"
 MODELS_DIR = ROOT / "models"
 LOGS_DIR = ROOT / "logs"
 
-DATASET_PATH = Path("/run/media/kali/New Volume/DIDI RL/NF-UNSW-NB15-v3.csv")
+import os as _os
+DATASET_FILENAME = "NF-UNSW-NB15-v3.csv"
+DATASET_PATH = Path(_os.getenv("XAI_IDS_DATASET", DATA_RAW / DATASET_FILENAME))
 
 LABEL_COL = "Label"
 ATTACK_COL = "Attack"

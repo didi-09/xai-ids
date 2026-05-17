@@ -51,8 +51,8 @@ def train_multiclass(model_type="rf"):
     else:
         model = xgb.XGBClassifier(
             n_estimators=N_ESTIMATORS, max_depth=10,
-            learning_rate=0.1, use_label_encoder=False,
-            eval_metric="mlogloss", n_jobs=-1, random_state=RANDOM_STATE
+            learning_rate=0.1, eval_metric="mlogloss",
+            n_jobs=-1, random_state=RANDOM_STATE
         )
 
     print("  Training...")

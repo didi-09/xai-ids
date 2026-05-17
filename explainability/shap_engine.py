@@ -72,7 +72,7 @@ class SHAPEngine:
             plt.show()
         plt.close()
 
-    def explain_single(self, x: np.ndarray, idx: int = 0) -> dict:
+    def explain_single(self, x: np.ndarray, idx: int = 0, top_n: int = 5) -> dict:
         """
         Explain a single prediction.
         Returns: {"label": int, "confidence": float, "shap_vals": [...], "reasons": str}
@@ -97,7 +97,7 @@ class SHAPEngine:
         else:
             sv_flat = sv
 
-        reasons = self._shap_to_nlg(sv_flat, pred)
+        reasons = self._shap_to_nlg(sv_flat, pred, top_n=top_n)
         return {
             "label": int(pred),
             "label_name": "Malicious" if pred == 1 else "Benign",

@@ -40,7 +40,7 @@ def simulate(delay: float = 0.1, n: int = 100, verbose: bool = True):
             print(
                 f"[{ts}] {status} {result['label_name']:10s} "
                 f"conf={result['confidence']:.2f} | "
-                f"{result['reasons'].split(chr(10))[2].strip() if chr(10) in result['reasons'] else ''}"
+    f"{next((l.strip() for l in result['reasons'].split(chr(10)) if l.strip().startswith('-')), '')}"
             )
 
         time.sleep(delay)
