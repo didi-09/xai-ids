@@ -19,6 +19,7 @@
 \usepackage{titlesec}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{url}
+\graphicspath{{figures/}}
 
 \hypersetup{
   colorlinks=true,
@@ -297,6 +298,13 @@ Worms          &       158 &  0.01 \\
 The severe imbalance (94.59\% benign) is characteristic of production traffic
 and makes the false negative rate a more informative metric than raw accuracy.
 
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.72\linewidth]{eda_class_dist.png}
+\caption{Binary and multi-class label distributions in NF-UNSW-NB15-v3.}
+\label{fig:class_dist}
+\end{figure}
+
 \subsection{Preprocessing Pipeline}
 
 The preprocessing pipeline applies the following transformations in sequence:
@@ -327,6 +335,14 @@ yielding 11 dropped features: \texttt{OUT\_PKTS}, \texttt{CLIENT\_TCP\_FLAGS},
 \texttt{SERVER\_TCP\_FLAGS}, \texttt{DURATION\_IN}, \texttt{MAX\_TTL},
 \texttt{MAX\_IP\_PKT\_LEN}, \texttt{DST\_TO\_SRC\_AVG\_THROUGHPUT},
 \texttt{RETRANSMITTED\_IN\_BYTES/PKTS}, and \texttt{RETRANSMITTED\_OUT\_BYTES/PKTS}.
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.82\linewidth]{eda_correlation.png}
+\caption{Pearson correlation heatmap of the top-15 numerical features. Pairs
+with $|r|>0.95$ are pruned to eliminate redundancy.}
+\label{fig:correlation}
+\end{figure}
 
 \paragraph{Final feature set.}
 After pruning, \textbf{32 features} were retained, covering port numbers, protocol
@@ -465,6 +481,23 @@ RF (edge, $N=25$, $d=8$)   & 99.99\% & 99.84\% & 99.99\% & 99.91\% & 1.0000 & 0.
 \end{tabular}
 \end{table}
 
+\begin{figure}[h!]
+\centering
+\begin{subfigure}[b]{0.48\linewidth}
+  \includegraphics[width=\linewidth]{confusion_matrix.png}
+  \caption{Confusion matrix (RF Full).}
+  \label{fig:cm}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\linewidth}
+  \includegraphics[width=\linewidth]{roc_curve.png}
+  \caption{ROC curves — full vs.\ edge model.}
+  \label{fig:roc}
+\end{subfigure}
+\caption{Binary classification evaluation on 470,122 held-out flows.}
+\label{fig:binary_eval}
+\end{figure}
+
 Both models achieve near-perfect discrimination. The edge model achieves a
 \emph{lower} false negative rate (0.01\% vs.\ 0.02\%), which is the safety-critical
 metric for IDS: missed attacks are more costly than false alarms. The marginal
@@ -502,6 +535,16 @@ Weighted F1    & \multicolumn{3}{c}{99.21\%} \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.82\linewidth]{multiclass_f1.png}
+\caption{Per-class F1-scores for the multiclass Random Forest. Green bars
+($\geq$0.90) indicate well-detected classes; orange bars (0.60--0.90) indicate
+moderate performance; red bars ($<$0.60) indicate rare classes suffering from
+insufficient training samples.}
+\label{fig:multiclass_f1}
+\end{figure}
+
 The large gap between weighted F1 (99.21\%) and macro F1 (63.65\%) reflects
 the extreme class imbalance. Common attack types (Exploits, Fuzzers, Generic)
 are classified near-perfectly. Rare classes (Worms: 32 samples, Analysis: 245
@@ -528,6 +571,34 @@ test samples:
 These findings are consistent with domain knowledge in network security and
 provide operators with actionable understanding of the classifier's decision basis.
 
+\begin{figure}[h!]
+\centering
+\begin{subfigure}[b]{0.48\linewidth}
+  \includegraphics[width=\linewidth]{feature_importance.png}
+  \caption{Top-15 RF built-in feature importances (mean decrease in impurity).}
+  \label{fig:rf_importance}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\linewidth}
+  \includegraphics[width=\linewidth]{shap_global.png}
+  \caption{Global SHAP feature importances (mean $|\phi_j|$ over 200 test samples).}
+  \label{fig:shap_global}
+\end{subfigure}
+\caption{Feature importance comparison: RF impurity-based vs.\ SHAP attribution.
+Both methods consistently rank \texttt{MIN\_TTL}, \texttt{IN\_PKTS}, and
+\texttt{FLOW\_DURATION\_MILLISECONDS} as the most discriminative features.}
+\label{fig:importance_comparison}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.82\linewidth]{shap_beeswarm.png}
+\caption{SHAP beeswarm plot showing the distribution and direction of feature
+impacts across 200 test samples. Each point is one flow; colour indicates feature
+value (red = high, blue = low). Features sorted by mean $|\phi_j|$.}
+\label{fig:shap_beeswarm}
+\end{figure}
+
 \subsection{Edge Deployment Benchmark}
 
 Table~\ref{tab:edge_benchmark} compares runtime performance of the full and
@@ -546,6 +617,14 @@ RF edge ($N=25$, $d=8$)   & 0.09 & 11,055 & \textbf{0.25~MB} & \textbf{0.15~MB} 
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.55\linewidth]{throughput_tradeoff.png}
+\caption{Throughput vs.\ F1-score tradeoff between the full and edge-optimised
+models. The edge model doubles throughput with negligible accuracy loss.}
+\label{fig:tradeoff}
+\end{figure}
 
 The edge model exceeds the Raspberry Pi 4 target of 500 flows/second by a factor
 of \textbf{22$\times$}, with a model footprint well within embedded memory budgets.
