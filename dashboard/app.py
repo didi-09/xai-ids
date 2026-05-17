@@ -5,7 +5,6 @@ Run: streamlit run dashboard/app.py
 import sys
 import time
 import numpy as np
-import joblib
 from pathlib import Path
 from datetime import datetime
 
@@ -14,35 +13,39 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.config import DATA_PROCESSED, MODELS_DIR
 from explainability.shap_engine import SHAPEngine
-from dashboard.components.stats_panel import render_stats
-from dashboard.components.prediction_feed import render_feed
-from dashboard.components.shap_panel import render_shap_explanation, render_global_importance
+from dashboard.components.stats_panel import render_metrics
+from dashboard.components.prediction_feed import render_feed, render_explanation
+from dashboard.components.shap_panel import render_global_importance, render_beeswarm
 
 st.set_page_config(
-    page_title="XAI-IDS Dashboard",
+    page_title="XAI-IDS — Network Threat Monitor",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("🛡️ XAI-IDS")
-    st.caption("Explainable Intrusion Detection System for IoT Networks")
-    st.divider()
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+[data-testid="stAppViewContainer"] { background: #f8fafc; }
+[data-testid="stHeader"] { background: transparent; }
+h1 { font-size: 1.6rem !important; }
+h3 { font-size: 1.05rem !important; margin-bottom: 6px !important; }
+div[data-testid="metric-container"] {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+.stButton > button {
+    border-radius: 6px;
+    font-weight: 600;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    mode = st.radio("Mode", ["Dataset Simulation", "Upload CSV"])
-    speed = st.slider("Simulation speed (flows/sec)", 1, 50, 10)
-    top_n_shap = st.slider("SHAP top features", 3, 10, 5)
-
-    st.divider()
-    if st.button("Reset Session"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
-# ── Load model + SHAP ────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="Loading model...")
+# ── Load resources ────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Loading detection model...")
 def load_engine():
     model_path = MODELS_DIR / "rf_binary.pkl"
     if not model_path.exists():
@@ -50,7 +53,7 @@ def load_engine():
     return SHAPEngine(model_path=model_path)
 
 
-@st.cache_data(show_spinner="Loading test data...")
+@st.cache_resource(show_spinner="Loading network data...")
 def load_test_data():
     path = DATA_PROCESSED / "X_test.npy"
     if not path.exists():
@@ -58,7 +61,7 @@ def load_test_data():
     return np.load(path)
 
 
-@st.cache_resource(show_spinner="Computing global SHAP...")
+@st.cache_resource(show_spinner="Analyzing feature importance (one-time)...")
 def load_global_shap(max_samples=300):
     _engine = load_engine()
     _X = load_test_data()
@@ -71,6 +74,14 @@ def load_global_shap(max_samples=300):
 engine = load_engine()
 X_test = load_test_data()
 
+# ── Guard: missing model or data ──────────────────────────────────────────────
+if engine is None:
+    st.error("⚠️ No trained model found. Run `python models/train_binary.py` first.")
+    st.stop()
+if X_test is None:
+    st.error("⚠️ No processed data found. Run `python preprocessing/pipeline.py` first.")
+    st.stop()
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "predictions" not in st.session_state:
     st.session_state.predictions = []
@@ -78,81 +89,123 @@ if "sim_idx" not in st.session_state:
     st.session_state.sim_idx = 0
 if "selected_pred" not in st.session_state:
     st.session_state.selected_pred = None
+if "running" not in st.session_state:
+    st.session_state.running = False
 
-# ── No model warning ──────────────────────────────────────────────────────────
-if engine is None:
-    st.error("No trained model found. Run `python models/train_binary.py` first.")
-    st.stop()
+# ── Header ────────────────────────────────────────────────────────────────────
+col_title, col_status = st.columns([3, 1])
+with col_title:
+    st.markdown("## 🛡️ Network Threat Monitor")
+    st.caption("Every decision is explained in plain English. No ML knowledge required.")
+with col_status:
+    analyzed = st.session_state.sim_idx
+    total_available = len(X_test)
+    progress = analyzed / total_available if total_available > 0 else 0
+    st.markdown(f"**Progress:** {analyzed:,} / {total_available:,} flows")
+    st.progress(progress)
 
-if X_test is None:
-    st.warning("No preprocessed data found. Run `python preprocessing/pipeline.py` first.")
-    st.stop()
+st.divider()
 
-# ── Main layout ───────────────────────────────────────────────────────────────
-st.title("🛡️ XAI Intrusion Detection System")
-st.caption("Real-time explainable IoT network traffic classification")
+# ── Metric cards ──────────────────────────────────────────────────────────────
+render_metrics(st.session_state.predictions)
 
-tab_live, tab_explain, tab_global = st.tabs(["Live Feed", "Explanation", "Global SHAP"])
+st.divider()
 
-# ── Tab 1: Live Feed ──────────────────────────────────────────────────────────
-with tab_live:
-    col_stats, col_feed = st.columns([1, 2])
+# ── Controls ──────────────────────────────────────────────────────────────────
+ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 2, 1, 3])
 
-    with col_stats:
-        render_stats(st.session_state.predictions)
+with ctrl1:
+    batch_size = st.select_slider(
+        "Flows per step",
+        options=[1, 5, 10, 25, 50],
+        value=10,
+        label_visibility="collapsed",
+        help="How many network flows to analyze each time you click Analyze"
+    )
+    st.caption(f"Analyzing **{batch_size}** flows per step")
 
-    with col_feed:
-        st.subheader("Prediction Feed")
-        render_feed(st.session_state.predictions)
+with ctrl2:
+    run_btn = st.button("▶ Analyze Next Batch", use_container_width=True, type="primary")
 
-    run_col, stop_col = st.columns(2)
-    run_sim = run_col.button("▶ Run Simulation Step", use_container_width=True)
-    auto_run = stop_col.checkbox("Auto-run (continuous)")
+with ctrl3:
+    reset_btn = st.button("🔄 Reset", use_container_width=True)
 
-    if run_sim or auto_run:
-        idx = st.session_state.sim_idx
-        if idx < len(X_test):
-            batch = X_test[idx:idx + speed]
-            for row in batch:
-                result = engine.explain_single(row, top_n=top_n_shap)
-                result["timestamp"] = datetime.now().strftime("%H:%M:%S")
-                st.session_state.predictions.append(result)
-                st.session_state.selected_pred = result
-            st.session_state.sim_idx += len(batch)
-        else:
-            st.info("Simulation complete — all test flows processed.")
+with ctrl4:
+    auto_run = st.checkbox("▶▶ Auto-run continuously", value=False,
+                           help="Keeps analyzing flows automatically until all are processed")
+
+if reset_btn:
+    st.session_state.predictions = []
+    st.session_state.sim_idx = 0
+    st.session_state.selected_pred = None
+    st.rerun()
+
+# ── Run simulation ─────────────────────────────────────────────────────────────
+if run_btn or auto_run:
+    idx = st.session_state.sim_idx
+    if idx >= len(X_test):
+        st.success(f"✅ All {len(X_test):,} flows analyzed.")
+    else:
+        batch = X_test[idx:idx + batch_size]
+        for row in batch:
+            result = engine.explain_single(row, top_n=5)
+            result["timestamp"] = datetime.now().strftime("%H:%M:%S")
+            st.session_state.predictions.append(result)
+            st.session_state.selected_pred = result
+        st.session_state.sim_idx += len(batch)
 
         if auto_run:
-            time.sleep(1.0 / max(speed, 1))
+            time.sleep(0.3)
             st.rerun()
         else:
             st.rerun()
 
-# ── Tab 2: Explanation ────────────────────────────────────────────────────────
-with tab_explain:
+st.divider()
+
+# ── Main split: Feed + Explanation ────────────────────────────────────────────
+left_col, right_col = st.columns([1, 1], gap="large")
+
+with left_col:
+    render_feed(st.session_state.predictions)
+
+with right_col:
+    st.markdown("#### Why did the model decide this?")
     pred = st.session_state.selected_pred
     if pred is None:
-        st.info("Run the simulation to see per-prediction explanations.")
+        st.markdown(
+            """<div style="background:white; border:1px solid #e2e8f0; border-radius:8px;
+                padding:24px; text-align:center; color:#718096;">
+                <p style="font-size:2em; margin:0;">🔍</p>
+                <p>Click <b>Analyze</b> to start monitoring.<br>
+                The explanation for each decision will appear here.</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
     else:
-        render_shap_explanation(pred)
+        render_explanation(pred)
 
-        st.divider()
-        st.subheader("SHAP Force Plot")
-        try:
-            # Find the raw feature vector for this prediction
-            # (simplified: use most recent sim index - 1)
-            last_idx = max(0, st.session_state.sim_idx - 1)
-            html = engine.waterfall_html(X_test[last_idx])
-            import streamlit.components.v1 as components
-            components.html(html, height=320, scrolling=True)
-        except Exception as e:
-            st.warning(f"Force plot unavailable: {e}")
+st.divider()
 
-# ── Tab 3: Global SHAP ────────────────────────────────────────────────────────
-with tab_global:
-    st.subheader("Global Feature Importance")
+# ── Advanced section ──────────────────────────────────────────────────────────
+with st.expander("📊 Advanced Analysis — Feature Importance (for technical users)"):
+    st.markdown(
+        "These charts show **which network features matter most** across all analyzed flows. "
+        "They answer: *'What patterns does the model look for when detecting threats?'*"
+    )
     sv, X_sub = load_global_shap()
     if sv is not None:
-        render_global_importance(sv, X_sub, engine.feature_names)
+        tab_bar, tab_bee = st.tabs(["Feature Importance", "Detailed Impact Chart"])
+        with tab_bar:
+            render_global_importance(sv, X_sub, engine.feature_names)
+        with tab_bee:
+            render_beeswarm(sv, X_sub, engine.feature_names)
     else:
-        st.warning("Global SHAP not available — model or data missing.")
+        st.warning("Feature importance data not available.")
+
+# ── Footer ────────────────────────────────────────────────────────────────────
+st.markdown(
+    "<hr><p style='text-align:center; color:#a0aec0; font-size:0.8em;'>"
+    "XAI-IDS · Random Forest + SHAP · NF-UNSW-NB15-v3 · "
+    "Binary F1: 99.94% · AUC: 1.00 · FNR: 0.02%</p>",
+    unsafe_allow_html=True,
+)
