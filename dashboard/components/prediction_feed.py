@@ -90,12 +90,11 @@ def render_feed(predictions: list, max_rows: int = 60):
 
         with st.container():
             st.markdown(
-                f"""<div style="border-left: 4px solid {border}; background:{bg};
-                    padding: 8px 12px; border-radius: 4px; margin-bottom: 6px;">
-                    <span style="font-size:1.05em; font-weight:600;">{icon} {status}</span>
-                    &nbsp;·&nbsp;<span style="color:#555; font-size:0.9em;">{ts}</span>
-                    &nbsp;·&nbsp;<span style="font-size:0.9em;">Confidence: <b>{conf:.0%}</b></span><br>
-                    <span style="font-size:0.88em; color:#444;">{top_line}</span>
+                f"""<div style="border-left:4px solid {border}; background:{bg};
+                    padding:8px 12px; border-radius:4px; margin-bottom:6px; color:#1a202c;">
+                    <span style="font-size:1.05em; font-weight:700; color:{border};">{icon} {status}</span>
+                    &nbsp;&nbsp;<span style="color:#4a5568; font-size:0.88em;">{ts} &nbsp;·&nbsp; Confidence: <b>{conf:.0%}</b></span><br>
+                    <span style="font-size:0.9em; color:#2d3748;">{top_line}</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -112,10 +111,10 @@ def render_explanation(pred: dict):
     conf = pred["confidence"]
 
     st.markdown(
-        f"""<div style="border: 2px solid {border}; background:{bg};
-            padding: 16px 20px; border-radius: 8px; margin-bottom: 12px;">
-            <h3 style="color:{color}; margin:0 0 4px 0;">{icon} {verdict}</h3>
-            <p style="margin:0; color:#555;">Model confidence: <b>{conf:.1%}</b></p>
+        f"""<div style="border:2px solid {border}; background:{bg};
+            padding:16px 20px; border-radius:8px; margin-bottom:12px; color:#1a202c;">
+            <div style="font-size:1.3em; font-weight:700; color:{color};">{icon} {verdict}</div>
+            <div style="margin-top:4px; color:#4a5568;">Model confidence: <b style="color:#1a202c;">{conf:.1%}</b></div>
         </div>""",
         unsafe_allow_html=True,
     )

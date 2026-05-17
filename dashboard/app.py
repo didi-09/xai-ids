@@ -24,25 +24,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-[data-testid="stAppViewContainer"] { background: #f8fafc; }
-[data-testid="stHeader"] { background: transparent; }
-h1 { font-size: 1.6rem !important; }
-h3 { font-size: 1.05rem !important; margin-bottom: 6px !important; }
-div[data-testid="metric-container"] {
-    background: white;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 12px 16px;
-}
-.stButton > button {
-    border-radius: 6px;
-    font-weight: 600;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ── Load resources ────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Loading detection model...")
@@ -172,15 +153,7 @@ with right_col:
     st.markdown("#### Why did the model decide this?")
     pred = st.session_state.selected_pred
     if pred is None:
-        st.markdown(
-            """<div style="background:white; border:1px solid #e2e8f0; border-radius:8px;
-                padding:24px; text-align:center; color:#718096;">
-                <p style="font-size:2em; margin:0;">🔍</p>
-                <p>Click <b>Analyze</b> to start monitoring.<br>
-                The explanation for each decision will appear here.</p>
-            </div>""",
-            unsafe_allow_html=True,
-        )
+        st.info("🔍 Click **▶ Analyze Next Batch** to start.\n\nThe explanation for each decision will appear here.")
     else:
         render_explanation(pred)
 
@@ -203,9 +176,5 @@ with st.expander("📊 Advanced Analysis — Feature Importance (for technical u
         st.warning("Feature importance data not available.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown(
-    "<hr><p style='text-align:center; color:#a0aec0; font-size:0.8em;'>"
-    "XAI-IDS · Random Forest + SHAP · NF-UNSW-NB15-v3 · "
-    "Binary F1: 99.94% · AUC: 1.00 · FNR: 0.02%</p>",
-    unsafe_allow_html=True,
-)
+st.divider()
+st.caption("XAI-IDS · Random Forest + SHAP · NF-UNSW-NB15-v3 · Binary F1: 99.94% · AUC: 1.00 · FNR: 0.02%")
