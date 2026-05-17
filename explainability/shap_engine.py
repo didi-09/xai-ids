@@ -133,20 +133,26 @@ class SHAPEngine:
         return "\n".join(lines)
 
     def waterfall_html(self, x: np.ndarray) -> str:
-        """Return SHAP force plot as HTML string for Streamlit embedding."""
+        """Return SHAP force plot as a self-contained HTML string."""
         if x.ndim == 1:
             x = x.reshape(1, -1)
         sv = self.explainer.shap_values(x)
-        if isinstance(sv, list):
-            sv = sv[1]
-        html = shap.force_plot(
-            self.explainer.expected_value if not isinstance(self.explainer.expected_value, list)
-            else self.explainer.expected_value[1],
-            sv[0], x[0],
+        sv = np.array(sv)
+        if sv.ndim == 3:
+            sv = sv[1] if sv.shape[0] != x.shape[0] else sv[:, :, 1]
+        base = self.explainer.expected_value
+        if isinstance(base, (list, np.ndarray)):
+            base = base[1]
+        plot = shap.force_plot(
+            float(base), sv[0], x[0],
             feature_names=self.feature_names,
             matplotlib=False
         )
-        return shap.getjs() + html.html()
+        # shap.getjs() removed in 0.45+ — use save_html to get self-contained HTML
+        import io
+        buf = io.StringIO()
+        shap.save_html(buf, plot)
+        return buf.getvalue()
 
 
 if __name__ == "__main__":

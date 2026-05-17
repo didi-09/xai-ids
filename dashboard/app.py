@@ -58,14 +58,14 @@ def load_test_data():
     return np.load(path)
 
 
-@st.cache_data(show_spinner="Computing global SHAP...")
+@st.cache_resource(show_spinner="Computing global SHAP...")
 def load_global_shap(max_samples=300):
-    engine = load_engine()
-    X_test = load_test_data()
-    if engine is None or X_test is None:
+    _engine = load_engine()
+    _X = load_test_data()
+    if _engine is None or _X is None:
         return None, None
-    sv = engine.compute_shap(X_test, max_samples=max_samples)
-    return sv, X_test[:max_samples]
+    sv = _engine.compute_shap(_X, max_samples=max_samples)
+    return sv, _X[:max_samples]
 
 
 engine = load_engine()
@@ -144,7 +144,7 @@ with tab_explain:
             last_idx = max(0, st.session_state.sim_idx - 1)
             html = engine.waterfall_html(X_test[last_idx])
             import streamlit.components.v1 as components
-            components.html(html, height=200, scrolling=False)
+            components.html(html, height=320, scrolling=True)
         except Exception as e:
             st.warning(f"Force plot unavailable: {e}")
 
