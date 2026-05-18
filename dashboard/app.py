@@ -42,6 +42,47 @@ def load_test_data():
     return np.load(path)
 
 
+@st.cache_resource(show_spinner="Loading labels...")
+def load_test_labels():
+    path = DATA_PROCESSED / "y_test.npy"
+    if not path.exists():
+        return None
+    return np.load(path)
+
+
+@st.cache_resource
+def build_sim_sequence():
+    """Interleave malicious samples so ~1 in 5 flows shown is a threat."""
+    X = load_test_data()
+    y = load_test_labels()
+    if X is None:
+        return None
+    if y is None:
+        return np.arange(len(X), dtype=int)
+
+    rng = np.random.default_rng(42)
+    mal_idx = np.where(y == 1)[0]
+    ben_idx = np.where(y == 0)[0]
+    mal_shuffled = rng.permutation(mal_idx)
+    ben_shuffled = rng.permutation(ben_idx)
+
+    # 1 threat every 4 benign → ~20% threat rate visible in the feed
+    ratio = 4
+    seq = []
+    mi, bi = 0, 0
+    while mi < len(mal_shuffled) and bi < len(ben_shuffled):
+        for _ in range(ratio):
+            if bi < len(ben_shuffled):
+                seq.append(int(ben_shuffled[bi]))
+                bi += 1
+        seq.append(int(mal_shuffled[mi]))
+        mi += 1
+    while bi < len(ben_shuffled):
+        seq.append(int(ben_shuffled[bi]))
+        bi += 1
+    return np.array(seq, dtype=int)
+
+
 @st.cache_resource(show_spinner="Analyzing feature importance (one-time)...")
 def load_global_shap(max_samples=300):
     _engine = load_engine()
@@ -54,6 +95,7 @@ def load_global_shap(max_samples=300):
 
 engine = load_engine()
 X_test = load_test_data()
+sim_seq = build_sim_sequence()
 
 # ── Guard: missing model or data ──────────────────────────────────────────────
 if engine is None:
@@ -63,6 +105,8 @@ if X_test is None:
     st.error("⚠️ No processed data found. Run `python preprocessing/pipeline.py` first.")
     st.stop()
 
+total_available = len(sim_seq) if sim_seq is not None else len(X_test)
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "predictions" not in st.session_state:
     st.session_state.predictions = []
@@ -70,8 +114,6 @@ if "sim_idx" not in st.session_state:
     st.session_state.sim_idx = 0
 if "selected_pred" not in st.session_state:
     st.session_state.selected_pred = None
-if "running" not in st.session_state:
-    st.session_state.running = False
 
 # ── Header ────────────────────────────────────────────────────────────────────
 col_title, col_status = st.columns([3, 1])
@@ -80,7 +122,6 @@ with col_title:
     st.caption("Every decision is explained in plain English. No ML knowledge required.")
 with col_status:
     analyzed = st.session_state.sim_idx
-    total_available = len(X_test)
     progress = analyzed / total_available if total_available > 0 else 0
     st.markdown(f"**Progress:** {analyzed:,} / {total_available:,} flows")
     st.progress(progress)
@@ -124,22 +165,29 @@ if reset_btn:
 # ── Run simulation ─────────────────────────────────────────────────────────────
 if run_btn or auto_run:
     idx = st.session_state.sim_idx
-    if idx >= len(X_test):
-        st.success(f"✅ All {len(X_test):,} flows analyzed.")
+    if idx >= total_available:
+        st.success(f"✅ All {total_available:,} flows analyzed.")
     else:
-        batch = X_test[idx:idx + batch_size]
+        indices = sim_seq[idx:idx + batch_size]
+        batch = X_test[indices]
+
+        last_threat = None
+        last_result = None
         for row in batch:
             result = engine.explain_single(row, top_n=5)
             result["timestamp"] = datetime.now().strftime("%H:%M:%S")
             st.session_state.predictions.append(result)
-            st.session_state.selected_pred = result
+            last_result = result
+            if result["label"] == 1:
+                last_threat = result
+
+        # Prioritise showing the last threat explanation; fall back to last flow
+        st.session_state.selected_pred = last_threat if last_threat is not None else last_result
         st.session_state.sim_idx += len(batch)
 
         if auto_run:
             time.sleep(0.3)
-            st.rerun()
-        else:
-            st.rerun()
+        st.rerun()
 
 st.divider()
 

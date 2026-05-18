@@ -77,7 +77,10 @@ def render_feed(predictions: list, max_rows: int = 60):
         return
 
     st.markdown("#### Recent Traffic")
-    for p in predictions[-max_rows:][::-1]:
+    st.caption("Click **View →** on any row to see its full explanation.")
+
+    visible = predictions[-max_rows:][::-1]
+    for i, p in enumerate(visible):
         is_threat = p["label"] == 1
         bg = "#fff5f5" if is_threat else "#f0fff4"
         border = "#fc8181" if is_threat else "#68d391"
@@ -88,16 +91,26 @@ def render_feed(predictions: list, max_rows: int = 60):
         top_reason = humanize_reason(p["reasons"])
         top_line = top_reason[0] if top_reason else "—"
 
-        with st.container():
+        # Stable key: position counting from the end of the full predictions list
+        pred_idx = len(predictions) - 1 - i
+
+        card_col, btn_col = st.columns([6, 1])
+        with card_col:
             st.markdown(
                 f"""<div style="border-left:4px solid {border}; background:{bg};
-                    padding:8px 12px; border-radius:4px; margin-bottom:6px; color:#1a202c;">
+                    padding:8px 12px; border-radius:4px; margin-bottom:4px; color:#1a202c;">
                     <span style="font-size:1.05em; font-weight:700; color:{border};">{icon} {status}</span>
                     &nbsp;&nbsp;<span style="color:#4a5568; font-size:0.88em;">{ts} &nbsp;·&nbsp; Confidence: <b>{conf:.0%}</b></span><br>
                     <span style="font-size:0.9em; color:#2d3748;">{top_line}</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
+        with btn_col:
+            st.write("")
+            if st.button("View →", key=f"view_{pred_idx}", use_container_width=True,
+                         help="Show full explanation for this flow"):
+                st.session_state.selected_pred = p
+                st.rerun()
 
 
 def render_explanation(pred: dict):

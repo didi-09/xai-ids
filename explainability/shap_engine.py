@@ -30,26 +30,28 @@ class SHAPEngine:
         X_sub = X[:max_samples]
         print(f"  Computing SHAP values for {len(X_sub)} samples...")
         shap_values = np.array(self.explainer.shap_values(X_sub))
-        # Normalize to (n_samples, n_features) for class 1
-        if shap_values.ndim == 3:
-            if shap_values.shape[0] == len(X_sub):  # (n_samples, n_features, n_classes)
-                shap_values = shap_values[:, :, 1]
-            else:  # (n_classes, n_samples, n_features)
-                shap_values = shap_values[1, :, :]
+        shap_values = self._normalize_shap(shap_values, X_sub, class_idx=1)
         self._shap_values_cache = shap_values
         self._X_cache = X_sub
         print("  Done.")
         return shap_values
 
+    def _normalize_shap(self, sv: np.ndarray, X: np.ndarray, class_idx: int) -> np.ndarray:
+        """Collapse SHAP array to (n_samples, n_features) for the requested class."""
+        n = X.shape[0]
+        if sv.ndim == 3:
+            if sv.shape[0] == n:          # (n_samples, n_features, n_classes)
+                return sv[:, :, class_idx]
+            else:                          # (n_classes, n_samples, n_features)
+                return sv[class_idx, :, :]
+        return sv                          # already 2-D
+
     def plot_global_importance(self, X: np.ndarray, save_path: Optional[Path] = None):
-        """Bar chart of mean |SHAP| per feature."""
         shap_values = self._shap_values_cache if self._X_cache is not None else self.compute_shap(X)
         plt.figure(figsize=(10, 6))
-        shap.summary_plot(
-            shap_values, self._X_cache,
-            feature_names=self.feature_names,
-            plot_type="bar", show=False
-        )
+        shap.summary_plot(shap_values, self._X_cache,
+                          feature_names=self.feature_names,
+                          plot_type="bar", show=False)
         if save_path:
             plt.savefig(save_path, bbox_inches="tight", dpi=150)
             print(f"  Saved → {save_path}")
@@ -58,97 +60,80 @@ class SHAPEngine:
         plt.close()
 
     def plot_beeswarm(self, X: np.ndarray, save_path: Optional[Path] = None):
-        """Beeswarm: feature impact distribution across samples."""
         shap_values = self._shap_values_cache if self._X_cache is not None else self.compute_shap(X)
         plt.figure(figsize=(10, 8))
-        shap.summary_plot(
-            shap_values, self._X_cache,
-            feature_names=self.feature_names,
-            show=False
-        )
+        shap.summary_plot(shap_values, self._X_cache,
+                          feature_names=self.feature_names, show=False)
         if save_path:
             plt.savefig(save_path, bbox_inches="tight", dpi=150)
         else:
             plt.show()
         plt.close()
 
-    def explain_single(self, x: np.ndarray, idx: int = 0, top_n: int = 5) -> dict:
+    def explain_single(self, x: np.ndarray, top_n: int = 5) -> dict:
         """
         Explain a single prediction.
-        Returns: {"label": int, "confidence": float, "shap_vals": [...], "reasons": str}
+        Returns: {"label": int, "confidence": float, "shap_values": [...], "reasons": str}
         """
         if x.ndim == 1:
             x = x.reshape(1, -1)
 
-        pred = self.model.predict(x)[0]
+        pred = int(self.model.predict(x)[0])
         proba = self.model.predict_proba(x)[0]
-        confidence = proba[pred]
+        confidence = float(proba[pred])
 
-        sv = self.explainer.shap_values(x)
-        sv = np.array(sv)
-        # sv shape: (n_classes, n_samples, n_features) or (n_samples, n_features, n_classes)
-        if sv.ndim == 3:
-            if sv.shape[0] == x.shape[0]:  # (n_samples, n_features, n_classes)
-                sv_flat = sv[0, :, pred]
-            else:  # (n_classes, n_samples, n_features)
-                sv_flat = sv[pred, 0, :]
-        elif sv.ndim == 2:
-            sv_flat = sv[0]
-        else:
-            sv_flat = sv
+        sv_raw = np.array(self.explainer.shap_values(x))
+        # Always explain from the class-1 (malicious) perspective so that
+        # positive SHAP = pushes toward malicious for both benign and threat samples.
+        sv_flat = self._normalize_shap(sv_raw, x, class_idx=1)[0]
 
         reasons = self._shap_to_nlg(sv_flat, pred, top_n=top_n)
         return {
-            "label": int(pred),
+            "label": pred,
             "label_name": "Malicious" if pred == 1 else "Benign",
-            "confidence": float(confidence),
+            "confidence": confidence,
             "shap_values": sv_flat.tolist(),
             "feature_names": self.feature_names,
             "reasons": reasons,
         }
 
-    def _shap_to_nlg(self, shap_vals: np.ndarray, pred: int,
-                     top_n: int = 5, threshold: float = 0.05) -> str:
-        """Convert SHAP values to human-readable reasoning."""
+    def _shap_to_nlg(self, shap_vals: np.ndarray, pred: int, top_n: int = 5) -> str:
+        """Convert class-1 SHAP values to human-readable reasoning."""
         sv = np.array(shap_vals, dtype=float).flatten()
-        pairs = sorted(
-            zip(sv.tolist(), self.feature_names),
-            key=lambda x: abs(x[0]),
-            reverse=True
-        )
+        # Sort by absolute magnitude descending
+        pairs = sorted(zip(sv.tolist(), self.feature_names),
+                       key=lambda t: abs(t[0]), reverse=True)
+
         label = "Malicious" if pred == 1 else "Benign"
         lines = [f"Traffic classified as: {label}\n\nKey reasons:"]
-        count = 0
-        for val, feat in pairs:
-            if count >= top_n:
-                break
-            if abs(val) < threshold:
-                break
-            # For Benign predictions invert so "High X → more Benign" reads naturally
-            effective_val = val if pred == 1 else -val
-            direction = "High" if effective_val > 0 else "Low"
-            target = "malicious" if pred == 1 else "benign"
+
+        # For threats: positive SHAP = pushes toward malicious → "High X → more malicious"
+        # For benign:  negative SHAP = pushes toward benign   → "Low X → less malicious"
+        for val, feat in pairs[:top_n]:
+            direction = "High" if val > 0 else "Low"
+            if pred == 1:
+                target = "malicious"
+            else:
+                # Flip language for benign: a negative class-1 SHAP means
+                # this feature is suppressing the malicious signal.
+                target = "benign"
+                direction = "Low" if val > 0 else "High"
             lines.append(f"  - {direction} {feat} → more {target} (impact: {abs(val):.4f})")
-            count += 1
+
         return "\n".join(lines)
 
     def waterfall_html(self, x: np.ndarray) -> str:
         """Return SHAP force plot as a self-contained HTML string."""
         if x.ndim == 1:
             x = x.reshape(1, -1)
-        sv = self.explainer.shap_values(x)
-        sv = np.array(sv)
-        if sv.ndim == 3:
-            sv = sv[1] if sv.shape[0] != x.shape[0] else sv[:, :, 1]
+        sv = np.array(self.explainer.shap_values(x))
+        sv_flat = self._normalize_shap(sv, x, class_idx=1)
         base = self.explainer.expected_value
         if isinstance(base, (list, np.ndarray)):
-            base = base[1]
-        plot = shap.force_plot(
-            float(base), sv[0], x[0],
-            feature_names=self.feature_names,
-            matplotlib=False
-        )
-        # shap.getjs() removed in 0.45+ — use save_html to get self-contained HTML
+            base = float(base[1])
+        plot = shap.force_plot(float(base), sv_flat[0], x[0],
+                               feature_names=self.feature_names,
+                               matplotlib=False)
         import io
         buf = io.StringIO()
         shap.save_html(buf, plot)
